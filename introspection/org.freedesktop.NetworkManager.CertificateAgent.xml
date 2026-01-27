@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<node name="/">
+  <interface name="org.freedesktop.NetworkManager.CertificateAgent">
+
+    <!--
+        CertificateVerificationRequest:
+        @ssid: The SSID of the network for which the certificate verification is being requested.
+        @certificate_name: The name of the certificate being verified.
+        @issuer_name: The name of the issuer of the certificate.
+        @organization: The organization associated with the certificate.
+        @sha256_hex: The SHA-256 hash of the certificate in hexadecimal format.
+        @expiration_str: The expiration date of the certificate as a string.
+        @str_disclaimer: A disclaimer string that may be shown to the user.
+        @best_url: A URL that provides more information about the certificate.
+        @response (out): The response from the user regarding the certificate verification.
+
+        Called by NetworkManager to request user confirmation for a certificate
+        verification. The agent should present UI and complete the method later with the user's decision.
+        If the agent does not reply within NM's timeout, NM treats this as not accepted.
+    -->
+    <method name="CertificateVerificationRequest">
+      <arg name="ssid" type="s" direction="in"/>
+      <arg name="certificate_name" type="s" direction="in"/>
+      <arg name="issuer_name" type="s" direction="in"/>
+      <arg name="organization" type="s" direction="in"/>
+      <arg name="sha256_hex" type="s" direction="in"/>
+      <arg name="expiration_str" type="s" direction="in"/>
+      <arg name="str_disclaimer" type="s" direction="in"/>
+      <arg name="best_url" type="s" direction="in"/>
+      <arg name="response" type= "b" direction="out"/>
+    </method>
+
+    <!--
+        CertificateVerificationFailure:
+        @ssid: The SSID of the network for which the certificate verification failed.
+        @error_message: A message describing the error that occurred during certificate verification.
+
+        Called by NetworkManager when a certificate verification fails. The agent should log the error
+        or notify the user as appropriate.
+    -->
+    <method name="CertificateVerificationFailure">
+      <arg name="ssid" type="s" direction="in"/>
+      <arg name="error_message" type="s" direction="in"/>
+    </method>
+
+  </interface>
+</node>

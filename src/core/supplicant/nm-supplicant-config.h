@@ -77,5 +77,16 @@ gboolean nm_supplicant_config_enable_pmf_akm(NMSupplicantConfig *self, GError **
 
 void     nm_supplicant_config_set_ap_isolation(NMSupplicantConfig *self, gboolean ap_isolation);
 gboolean nm_supplicant_config_get_ap_isolation(NMSupplicantConfig *self);
+void nm_tofu_config_debug_dump(NMSupplicantConfig *self, const char *tag);
+gboolean nm_tofu_check_stage1(NMSupplicantConfig *self);
+gboolean nm_supplicant_config_ca_cert_is_set(NMSupplicantConfig *self);
+gboolean nm_supplicant_save_ca_cert (NMSupplicantConfig *self);
+void
+nm_supplicant_config_remove_option(NMSupplicantConfig *self, const char *key);
+void
+nm_supplicant_config_override_option(NMSupplicantConfig *self,
+                                     const char *key,
+                                     const char *value,
+                                     const char *display_value);
 
 #endif /* __NETWORKMANAGER_SUPPLICANT_CONFIG_H__ */

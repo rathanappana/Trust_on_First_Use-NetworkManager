@@ -19,6 +19,7 @@
 #include "libnm-std-aux/nm-dbus-compat.h"
 #include "nm-supplicant-config.h"
 #include "nm-supplicant-manager.h"
+#include "src/core/tofu/nm-tofu.h"
 
 #define DBUS_TIMEOUT_MSEC 20000
 #define PMK_LIFETIME_SEC  (3600 * 24 * 7)
@@ -3074,6 +3075,19 @@ _signal_handle(NMSupplicantInterface *self,
             g_variant_get(parameters, "(&o)", &path);
             bss_path = nm_ref_string_new(path);
             _bss_info_remove(self, &bss_path);
+            return;
+        }
+
+        if (nm_streq(signal_name, "Certification")) {
+            nm_log_warn(LOGD_CORE, "Received Certification signal from wpa_supplicant");
+
+            if (nm_tofu_get_session_type() == NM_TOFU_SESSION_TYPE_NONE) {
+                nm_log_warn(LOGD_TOFU, "TOFU is not active, Certification signal can simply be ignored");
+                return;
+            }else {
+                // it can be any case, we need to capture the cert from wpa_supplicant to verify it
+                nm_tofu_stage2_cert_signal(parameters);
+            }
             return;
         }
 

@@ -41,6 +41,7 @@
 #include "nm-wifi-common.h"
 #include "libnm-core-intern/nm-core-internal.h"
 #include "nm-config.h"
+#include "src/core/tofu/nm-tofu.h"
 
 #define _NMLOG_DEVICE_TYPE NMDeviceWifi
 #include "devices/nm-device-logging.h"
@@ -3371,6 +3372,35 @@ act_stage2_config(NMDevice *device, NMDeviceStateReason *out_failure_reason)
         g_clear_error(&error);
         NM_SET_OUT(out_failure_reason, NM_DEVICE_STATE_REASON_SUPPLICANT_CONFIG_FAILED);
         goto out_fail;
+    }
+
+    // TOFU - stage 1
+    if (nm_tofu_check_stage1(config)) {
+        // if the CA cert is not present, we need to set the session to tofu
+        if (nm_supplicant_config_ca_cert_is_set(config)) {
+            nm_log_warn(LOGD_TOFU, "NON TOFU session: CA cert present in connection '%s'",nm_connection_get_id(connection));
+            nm_tofu_set_session(NM_TOFU_SESSION_TYPE_CONFIGURED_CA, nm_connection_get_id(connection), nm_connection_get_uuid(connection));
+            // save the ca cert mentioned in the config
+            if (!nm_supplicant_save_ca_cert(config)) {
+                nm_log_err(LOGD_TOFU, "Failed to save CA cert for connection '%s'", nm_connection_get_id(connection));
+            }
+        } else {
+            if(nm_tofu_is_uuid_trusted(nm_connection_get_uuid(connection))) {
+                nm_log_warn(LOGD_TOFU, "CA cert not present but connection '%s' is trusted",nm_connection_get_id(connection));
+                nm_tofu_set_session(NM_TOFU_SESSION_TYPE_USER_TRUSTED_NO_CA, nm_connection_get_id(connection), nm_connection_get_uuid(connection));
+                // we are not suppressing anything here, as the user has already trusted this connection, if the server is verified, then it will go to normal connection
+                // if the server is not verified, then it will go to tofu session (normal tofu pop up apperas as it was new connection) or we can use seperate warning shows server cert changed 
+            } else {
+                nm_log_warn(LOGD_TOFU, "CA cert not present and connection '%s' is NOT trusted",nm_connection_get_id(connection));
+                nm_tofu_set_session(NM_TOFU_SESSION_TYPE_TOFU, nm_connection_get_id(connection), nm_connection_get_uuid(connection));
+                // supress the sensitive details in the first attempt
+                nm_supplicant_config_remove_option(config, "identity");
+                nm_supplicant_config_remove_option(config, "password");
+                nm_supplicant_config_override_option(config, "anonymous_identity", "IamBatMan", "IamBatMan");
+            }            
+        }
+    } else {
+        nm_log_err(LOGD_TOFU, "NOT a EAP connection");
     }
 
     /* Tell the supplicant in which bridge the interface is */

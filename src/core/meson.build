@@ -25,6 +25,9 @@ core_default_dep = declare_dependency(
   ],
 )
 
+# Add GnuTLS dependency for tofu cert parsing
+gnutls_dep = dependency('gnutls', required: true)
+
 install_data(
   'org.freedesktop.NetworkManager.conf',
   install_dir: dbus_conf_dir,
@@ -149,6 +152,8 @@ libNetworkManager = static_library(
     'supplicant/nm-supplicant-settings-verify.c',
     'vpn/nm-vpn-connection.c',
     'vpn/nm-vpn-manager.c',
+    'tofu/nm-tofu.c',
+    'tofu/nm-certificate-agent.c',
     'nm-active-connection.c',
     'nm-act-request.c',
     'nm-audit-manager.c',
@@ -175,7 +180,7 @@ libNetworkManager = static_library(
     'nm-power-monitor.c',
     'nm-priv-helper-call.c',
   ),
-  dependencies: nm_deps,
+  dependencies: nm_deps + [gnutls_dep],
   link_with: [
     libNetworkManagerBase,
     libnm_systemd_core,

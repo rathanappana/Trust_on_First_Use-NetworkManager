@@ -45,6 +45,14 @@ static const struct {
 static const int    num_subprograms = G_N_ELEMENTS(subprograms);
 static NmtNewtForm *toplevel_form;
 
+static void
+cert_verification_signal_handler(GDBusConnection *connection,
+                                  const gchar *sender_name,
+                                  const gchar *object_path,
+                                  const gchar *interface_name,
+                                  const gchar *signal_name,
+                                  GVariant *parameters,
+                                  gpointer user_data);
 static NmtNewtForm *
 quit_func(int argc, char **argv)
 {
@@ -212,6 +220,7 @@ main(int argc, char **argv)
     NmtuiStartupData startup_data;
     const char      *prgname;
     int              i;
+    GDBusConnection *connection;
 
     setlocale(LC_ALL, "");
     bindtextdomain(GETTEXT_PACKAGE, NMLOCALEDIR);
@@ -243,6 +252,20 @@ main(int argc, char **argv)
         g_printerr("%s\n", _("NetworkManager is not running."));
         exit(1);
     }
+
+    // subscribe to the internal dbus signal before it is going to the gloop
+    connection = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, NULL);
+
+    g_dbus_connection_signal_subscribe(connection,
+        NULL, // sender (any sender)
+        "org.freedesktop.NetworkManager.CertificateVerification", // your custom interface
+        "CertificateVerificationRequest", // the signal name
+        "/org/freedesktop/NetworkManager/CertificateVerification", // object path
+        NULL, // arg0
+        G_DBUS_SIGNAL_FLAGS_NONE,
+        cert_verification_signal_handler, // your C function to handle it
+        NULL,
+        NULL);
 
     if (sleep_on_startup)
         sleep(5);
@@ -291,4 +314,87 @@ main(int argc, char **argv)
     g_object_unref(nm_client);
 
     return 0;
+}
+
+static void
+cert_verification_signal_handler(GDBusConnection *connection,
+                                  const gchar *sender_name,
+                                  const gchar *object_path,
+                                  const gchar *interface_name,
+                                  const gchar *signal_name,
+                                  GVariant *parameters,
+                                  gpointer user_data)
+{
+    const gchar *ssid = NULL;
+    const gchar *subject = NULL;
+    const gchar *issuer = NULL;
+    const gchar *organization = NULL;
+    const gchar *hash = NULL;
+	const gchar *expiration = NULL;
+    const gchar *str_disclaimer = NULL;
+    gchar *message;
+    int choice;
+    gboolean user_response;
+
+    g_debug("[nmtui] Received CertificateVerificationRequest signal!");
+    g_printerr("[nmtui] Received CertificateVerificationRequest signal!");
+
+    if (!parameters)
+        return;
+
+    // Unpack parameters (we expect (@a{sv}))
+    g_variant_get(parameters, "(sssssss)", &ssid, &subject, &issuer, &organization, &hash, &expiration, &str_disclaimer);
+
+    // Create the prompt message
+    message = g_strdup_printf(
+        //"Server Certificate Verification\n\n"
+        "Is this Network '%s' Trusted ?\n\n"
+        "Only allow this network if the information below is correct.\n\n"
+        "Server Name: %s\n\n"
+        "Issuer Name: %s\n\n"
+        "Organization Name: %s\n\n"
+        "Certificate Expiration: %s\n\n"
+        "Disclaimer: %s\n\n"
+        "SHA-256 Fingerprint: %s \n\n",
+        ssid ? ssid : "(unknown)",
+        subject ? subject : "(unknown)",
+        issuer ? issuer : "(unknown)",
+        organization ? organization : "(unknown)",
+        expiration ? expiration : "(unknown)",
+        str_disclaimer ? str_disclaimer : "(no disclaimer provided)",
+        hash ? hash : "(unknown)"
+    );
+
+    // Show a choice dialog with Accept / Reject buttons
+    choice = newtWinChoice(
+        (char *) "Verify Certificate",
+        (char *) "Continue",
+        (char *) "Cancel",
+        message
+    );
+
+    g_free(message);
+
+    g_printerr("\n[nmtui] User chose: %d", choice);
+
+    // Interpret the user's choice
+    user_response = (choice == 1); // 0 = first button clicked (Accept)
+
+    g_printerr("\n[nmtui] User chose: %s", user_response ? "Accept" : "Reject");
+
+    // Send response back to NetworkManager via D-Bus method call
+    g_dbus_connection_call(
+        connection,
+        "org.freedesktop.NetworkManager",
+        "/org/freedesktop/NetworkManager",
+        "org.freedesktop.NetworkManager",
+        "CertificateVerificationResponse",
+        g_variant_new("(bs)", user_response, ssid ? ssid : ""),
+        NULL,                         // No reply expected
+        G_DBUS_CALL_FLAGS_NONE,
+        -1,                           // Default timeout
+        NULL,                         // No GCancellable
+        NULL,                         // No callback
+        NULL                          // No user_data
+    );
 }

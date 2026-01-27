@@ -594,5 +594,11 @@
       <arg name="device_path" type="o"/>
     </signal>
 
+
+    <method name="RegisterCertificateAgent">
+        <arg name="agent_bus_name" type="s" direction="in"/>
+        <arg name="object_path" type="o" direction="in"/>
+    </method>
+
   </interface>
 </node>

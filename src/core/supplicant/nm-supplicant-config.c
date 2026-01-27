@@ -18,6 +18,7 @@
 #include "NetworkManagerUtils.h"
 #include "nm-utils.h"
 #include "nm-setting-ip4-config.h"
+#include "src/core/tofu/nm-tofu.h"
 
 typedef struct {
     char          *value;
@@ -1918,4 +1919,141 @@ void
 nm_supplicant_config_set_ap_isolation(NMSupplicantConfig *self, gboolean ap_isolation)
 {
     self->_priv.ap_isolation = ap_isolation;
+}
+
+//this function is used to dump the current configuration of the supplicant, for tofu useage can be removed later for production
+void
+nm_tofu_config_debug_dump(NMSupplicantConfig *self, const char *tag)
+{
+    NMSupplicantConfigPrivate *priv;
+    GHashTableIter iter;
+    gpointer key;
+    ConfigOption *opt;
+
+    g_return_if_fail(NM_IS_SUPPLICANT_CONFIG(self));
+
+    priv = NM_SUPPLICANT_CONFIG_GET_PRIVATE(self);
+
+    nm_log_info(LOGD_SUPPLICANT, "[TOFU DEBUG] Dumping supplicant config for: %s", tag);
+
+    g_hash_table_iter_init(&iter, priv->config);
+    while (g_hash_table_iter_next(&iter, &key, (gpointer *) &opt)) {
+        const char *key_str = key;
+        const char *val_str = opt->value;
+
+        // Hide sensitive keys manually
+        if (g_strcmp0(key_str, "password") == 0 ||
+            g_strcmp0(key_str, "private_key_passwd") == 0)
+            val_str = "<hidden>";
+
+        nm_log_info(LOGD_SUPPLICANT, "[TOFU CONFIG]   %s = %s", key_str, val_str);
+    }
+}
+
+gboolean
+nm_tofu_check_stage1(NMSupplicantConfig *self)
+{
+    NMSupplicantConfigPrivate *priv;
+    ConfigOption *eap;
+    const char *eap_val;
+
+    g_return_val_if_fail(NM_IS_SUPPLICANT_CONFIG(self), FALSE);
+
+    priv = NM_SUPPLICANT_CONFIG_GET_PRIVATE(self);
+
+    // First, check if EAP is even configured
+    eap = g_hash_table_lookup(priv->config, "eap");
+    if (!eap || !eap->value || strlen(eap->value) == 0) {
+        nm_log_info(LOGD_TOFU, "Network does not use EAP, no CA cert required, not check for TOFU");
+        return FALSE;
+    }
+
+    // If EAP is configured, check the method(s) used/ more checks if required
+    eap_val = eap->value;
+    nm_log_info(LOGD_TOFU, "Network uses EAP method(s): %s", eap_val);
+    // Allow TOFU only for EAP methods that require server certs
+    if (   g_strrstr(eap_val, "TLS")
+        || g_strrstr(eap_val, "TTLS")
+        || g_strrstr(eap_val, "PEAP")) {
+        nm_log_info(LOGD_TOFU, "EAP method requires server certificate, eligible for TOFU.");
+    }else {
+        nm_log_info(LOGD_TOFU, "EAP method does not require server certificate, not eligible for TOFU.");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/* Check if CA cert is set  or not */
+gboolean
+nm_supplicant_config_ca_cert_is_set(NMSupplicantConfig *self)
+{
+    NMSupplicantConfigPrivate *priv;
+    ConfigOption *opt;
+
+    g_return_val_if_fail(NM_IS_SUPPLICANT_CONFIG(self), FALSE);
+
+    priv = NM_SUPPLICANT_CONFIG_GET_PRIVATE(self);
+
+    opt = g_hash_table_lookup(priv->config, "ca_cert");
+    if (!opt || !opt->value || strlen(opt->value) == 0)
+        return FALSE;
+    return TRUE;
+}
+
+gboolean
+nm_supplicant_save_ca_cert (NMSupplicantConfig *self)
+{
+    NMSupplicantConfigPrivate *priv;
+    ConfigOption *opt;
+    // used for saving the CA cert
+    GMappedFile *file;
+    GBytes *cert_data;
+
+    g_return_val_if_fail(NM_IS_SUPPLICANT_CONFIG(self), FALSE);
+
+    priv = NM_SUPPLICANT_CONFIG_GET_PRIVATE(self);
+
+    opt = g_hash_table_lookup(priv->config, "ca_cert");
+    file = g_mapped_file_new(opt->value, FALSE, NULL);
+    if (!file) {
+        nm_log_warn(LOGD_TOFU, "Failed to read configured ca_cert: %s", opt->value);
+        return FALSE;
+    }
+
+    cert_data = g_bytes_new(g_mapped_file_get_contents(file), g_mapped_file_get_length(file));
+    g_mapped_file_unref(file);
+
+    if (!cert_data) {
+        nm_log_warn(LOGD_TOFU, "Failed to create GBytes from ca_cert: %s", opt->value);
+        return FALSE;
+    }
+
+    // If we reach here, the CA cert is valid
+    nm_log_err(LOGD_TOFU, "CA cert is valid: %s", opt->value);
+    // use function to send this cert data to tofu
+    nm_save_config_ca_cert_data(cert_data);
+    return TRUE;
+    g_bytes_unref(cert_data);
+}
+
+void
+nm_supplicant_config_remove_option(NMSupplicantConfig *self, const char *key)
+{
+    NMSupplicantConfigPrivate *priv = NM_SUPPLICANT_CONFIG_GET_PRIVATE(self);
+
+    g_return_if_fail(NM_IS_SUPPLICANT_CONFIG(self));
+    g_return_if_fail(key);
+
+    g_hash_table_remove(priv->config, key);
+}
+
+void
+nm_supplicant_config_override_option(NMSupplicantConfig *self,
+                                     const char *key,
+                                     const char *value,
+                                     const char *display_value)
+{
+    /* Remove existing and re-add */
+    nm_supplicant_config_remove_option(self, key);
+    nm_supplicant_config_add_option(self, key, value, -1, display_value, NULL);
 }

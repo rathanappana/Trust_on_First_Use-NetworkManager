@@ -75,4 +75,5 @@ gboolean nm_agent_manager_all_agents_have_capability(NMAgentManager           *m
                                                      NMAuthSubject            *subject,
                                                      NMSecretAgentCapabilities capability);
 
+void nm_agent_manager_debug_list_available_agents(void);
 #endif /* __NETWORKMANAGER_AGENT_MANAGER_H__ */

@@ -1624,3 +1624,20 @@ nm_agent_manager_class_init(NMAgentManagerClass *agent_manager_class)
                                              1,
                                              G_TYPE_OBJECT);
 }
+
+void
+nm_agent_manager_debug_list_available_agents(void)
+{
+    NMAgentManager *self = nm_agent_manager_get();
+    NMAgentManagerPrivate *priv = NM_AGENT_MANAGER_GET_PRIVATE(self);
+    NMSecretAgent *agent;
+
+    nm_log_info(LOGD_AGENTS, "Listing registered SecretAgents:");
+    c_list_for_each_entry (agent, &priv->agent_lst_head, agent_lst) {
+        const char *identifier = nm_secret_agent_get_identifier(agent);
+        const char *bus_owner = nm_secret_agent_get_dbus_owner(agent);
+
+        nm_log_info(LOGD_AGENTS, "  Identifier : %s", identifier);
+        nm_log_info(LOGD_AGENTS, "  Bus Owner  : %s", bus_owner);
+    }
+}
