@@ -1,144 +1,130 @@
 NetworkManager
 ==============
 
-Networking that Just Works
---------------------------
+This repository contains a modified version of **NetworkManager** that introduces core support for **Trust On First Use (TOFU) style certificate verification** for WPA-Enterprise / TLS-based networks.
 
-NetworkManager attempts to keep an active network connection available at all
-times.  The point of NetworkManager is to make networking configuration and
-setup as painless and automatic as possible.  NetworkManager is intended to
-replace default route, replace other routes, set IP addresses, and in general
-configure networking as NM sees fit (with the possibility of manual override as
-necessary).  In effect, the goal of NetworkManager is to make networking Just
-Work with a minimum of user hassle, but still allow customization and a high
-level of manual network control.  If you have special needs, we'd like to hear
-about them, but understand that NetworkManager is not intended for every
-use-case.
+The changes are intentionally limited to **NetworkManager core** and provide a new D-Bus interface that allows certificate verification decisions to be delegated to a user-space agent (e.g. nm-applet, GNOME Shell, or a custom agent).
 
-NetworkManager will attempt to keep every network device in the system up and
-active, as long as the device is available for use (has a cable plugged in,
-the killswitch isn't turned on, etc).  Network connections can be set to
-'autoconnect', meaning that NetworkManager will make that connection active
-whenever it and the hardware is available.
-
-"Settings services" store lists of user- or administrator-defined "connections",
-which contain all the settings and parameters required to connect to a specific
-network.  NetworkManager will _never_ activate a connection that is not in this
-list, or that the user has not directed NetworkManager to connect to.
+No UI or policy decisions are embedded in NetworkManager itself except the nmtui.
 
 
-How it works
-------------
+Motivation
+----------
 
-The NetworkManager daemon runs as a privileged service (since it must access
-and control hardware), but provides a D-Bus interface on the system bus to
-allow for fine-grained control of networking.  NetworkManager does not store
-connections or settings, it is only the mechanism by which those connections
-are selected and activated.
+In current upstream NetworkManager, TLS certificate verification during WPA-Enterprise authentication is handled internally (with strict extreme cases, either provide a CA certificate or avoid complete validation), with no support for interactive or policy-driven workflows.
 
-To store pre-defined network connections, two separate services, the "system
-settings service" and the "user settings service" store connection information
-and provide these to NetworkManager, also via D-Bus.  Each settings service
-can determine how and where it persistently stores the connection information;
-for example, the GNOME applet stores its configuration in GConf, and the system
-settings service stores its config in distro-specific formats, or in a distro-
-agnostic format, depending on user/administrator preference.
+This makes it difficult to support:
+- Trust On First Use (TOFU)
+- Interactive certificate inspection
+- Research into certificate misuse and credential-stealing attacks
 
-A variety of other system services are used by NetworkManager to provide
-network functionality: wpa_supplicant for wireless connections and 802.1x
-wired connections, pppd for PPP and mobile broadband connections, DHCP clients
-for dynamic IP addressing, dnsmasq for proxy nameserver and DHCP server
-functionality for internet connection sharing, and avahi-autoipd for IPv4
-link-local addresses.  Most communication with these daemons occurs, again,
-via D-Bus.
+This work separates **certificate verification policy** from **connection management**, enabling safer and more flexible designs to pause and resume the connection based on trust decisions.
+
+High level design
+----------
 
 
-How to use it
--------------
-
-Install NetworkManager with your distribution's package manager.
-
-As NetworkManager is actually a daemon that runs in the background, you need to
-use one of the many existing client programs to interact with it.
-
-Terminal clients:
-- `nmcli`: advanced command line client that gives you full control over all the
-  aspects of NetworkManager, developed as part of the NetworkManager project.
-- `nmtui`: text-based user interface (TUI) client. Also for the terminal, but
-  interactive and more user friendly, also part of the NetworkManager project.
-- [`nmstate`][1]: declarative network API and command line tool that uses
-  NetworkManager as backend.
-- Ansible: use the [network-role][2] in your playbooks
-
-GUI clients
-- `nm-connection-editor` and `nm-applet`: basic GUI interfaces developed by
-  the NetworkManager project.
-- GNOME shell: interacts with NetworkManager via its default settings panel
-  `gnome-control-center`
-- KDE Plasma: interacts with NetworkManager via its default settings panel
-  and `plasma-nm`
+```mermaid
+flowchart TD
+    A["Connect started from user (nm-applet, GNOME Shell, custom UI)"] --> B["NetworkManager (core)"]
+    B --> C{TOFU needed ?}
+    C -->|Yes| D[Selecting the specific GUI agent]
+    C -->|No| E[Continue connection]
+    D --> F["CertificateVerificationRequest (D-Bus)"]
+    F --> G{"User decision"}
+    G --> |Reject| H[Terminate connection]
+    G --> |Accept| I[Update the changes]
+    I --> J[Restart the connection]
+```
 
 
-Why doesn't my network Just Work?
----------------------------------
+- NetworkManager detects when a certificate decision is required
+- Analization of the received certificate against trusted certificates
+- Certificate details are sent to a registered agent over D-Bus
+- The user decides whether the certificate should be accepted or rejected
+- NetworkManager resumes authentication based on the user's response
 
-Driver problems are the #1 cause of why NetworkManager sometimes fails to
-connect to wireless networks.  Often, the driver simply doesn't behave in a
-consistent manner, or is just plain buggy.  NetworkManager supports _only_
-those drivers that are shipped with the upstream Linux kernel, because only
-those drivers can be easily fixed and debugged.  ndiswrapper, vendor binary
-drivers, or other out-of-tree drivers may or may not work well with
-NetworkManager, precisely because they have not been vetted and improved by the
-open-source community, and because problems in these drivers usually cannot
-be fixed.
+New Dbus Interface
+----------
 
-Sometimes, command-line tools like 'iwconfig' will work, but NetworkManager will
-fail.  This is again often due to buggy drivers, because these drivers simply
-aren't expecting the dynamic requests that NetworkManager and wpa_supplicant
-make.  Driver bugs should be filed in the bug tracker of the distribution being
-run, since often distributions customize their kernel and drivers.
-
-Sometimes, it really is NetworkManager's fault.  If you think that's
-the case, please file a bug at:
-
-https://gitlab.freedesktop.org/NetworkManager/NetworkManager/issues
-
-Attaching NetworkManager debug logs from the journal (or wherever your
-distribution directs syslog's 'daemon' facility output, as
-/var/log/messages or /var/log/daemon.log) is often very helpful, and
-(if you can get) a working wpa_supplicant config file helps
-enormously.  See the logging section of file
-contrib/fedora/rpm/NetworkManager.conf for how to enable debug logging
-in NetworkManager.
+- Two new dbus interfaces are added one is to send a request and warning, user decisions are followed by a same request signal.
+- Selection of the specific GUI agents are happended in NM based the GUI capabilities defined while registration.
 
 
-Documentation
--------------
+Scope of This Repository
+-----
 
-Updated documentation can be found at https://networkmanager.dev/docs
+This repository includes:
+- Core NetworkManager changes
+- CertificateAgent D-Bus interface definition
+- Agent registration and dispatch logic
+- Safe delegation of certificate decisions
+- Persistent TOFU decisions
 
-Users can consult the man pages. Most relevant pages for normal users are:
-- NetworkManager daemon: [`NetworkManager (8)`][3], [`NetworkManager.conf (5)`][4]
-- nmcli: [`nmcli (1)`][5], [`nmcli-examples (5)`][6], [`nm-settings-nmcli (5)`][7]
-- nmtui: [`nmtui (1)`][8]
+This repository **does not include**:
+- User interface code
+- GNOME Shell or nm-applet integration (provided separately)
 
 
-Get in touch
-------------
+Applying the Changes to Upstream NetworkManager
+----
 
-To connect with the community, get help or get involved see the available
-communication channels at https://networkmanager.dev/community/
+These changes are designed to be applied **as a patch** on top of upstream NetworkManager.
 
-Report bugs or feature request in our [issue tracker](https://gitlab.freedesktop.org/NetworkManager/NetworkManager/-/issues).
-See [Report issues](https://gitlab.freedesktop.org/NetworkManager/NetworkManager/-/blob/main/CONTRIBUTING.md?ref_type=heads#report-issues)
-for details about how to do it.
+#### Example (Ubuntu / Debian):
+
+```bash
+git clone https://gitlab.freedesktop.org/NetworkManager/NetworkManager.git
+cd NetworkManager
+
+# Add this repository as a remote
+git remote add tofu git@github.com:rathanappana/Trust_on_First_Use-NetworkManager.git
+git fetch tofu
+
+# branch out for clean implementation
+git checkout -b tofu-on-upstream origin/main
+
+# Cherry-pick or apply the TOFU commit
+git cherry-pick d63e3c4
+
+# Build and install
+meson setup build
+ninja -C build
+sudo ninja -C build install
+```
+
+Ubuntu and other distributions regularly update NetworkManager; this approach keeps the TOFU changes isolated and reviewable.
+
+Security considerations
+-----
+
+- NetworkManager never implicitly trusts certificates
+  - Strict validation of the certificate based on provided CA certificate
+  - Else no validation at all
+- All acceptance decisions are explicit and delegated
+- No UI code runs in privileged NM context
+- D-Bus access is restricted via policy rules
+
+Research Context
+----
+
+This work is motivated by real-world attacks against WPA-Enterprise deployments, including credential harvesting via rogue access points and misconfigured certificate validation.
+
+The design enables controlled experimentation and safer defaults without breaking existing NetworkManager behavior.
+
+Disclaimer
+----
+
+This is a prototype and research-oriented extension of NetworkManager. It is not an official upstream release.
+
+Feedback, review, and discussion are welcome.
+
 
 
 Contribute
 ----------
 
-To get involved, see [CONTRIBUTING.md](CONTRIBUTING.md) to find different ways
-to contribute.
+To get involved, please email us.
 
 
 License
